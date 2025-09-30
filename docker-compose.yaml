@@ -37,11 +37,15 @@ services:
 
   client:
     build: ./client
+    volumes:
+      - ./client:/app
+      - /app/node_modules
     container_name: hrms_client
     environment:
       VITE_API_BASE_URL: http://localhost:8080
     ports:
       - '5173:5173'
+    command: ["npm","run","dev","--","--host","0.0.0.0","--strictPort","--port","5173"]
     depends_on:
       - api
 

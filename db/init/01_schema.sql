@@ -1,6 +1,7 @@
 CREATE TABLE IF NOT EXISTS employees (
   id SERIAL PRIMARY KEY,
-  name VARCHAR(100) NOT NULL,
+  first_name VARCHAR(50) NOT NULL,
+  last_name VARCHAR(50) NOT NULL,
   nric VARCHAR(12) NOT NULL,
   email VARCHAR(120) NOT NULL,
   phone VARCHAR(32),
@@ -13,3 +14,4 @@ CREATE TABLE IF NOT EXISTS employees (
   employment_type VARCHAR(32),
   manager VARCHAR(100)
 );
+

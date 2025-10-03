@@ -1,0 +1,27 @@
+# ---------- Build the React client ----------
+FROM node:20-alpine AS client-build
+WORKDIR /client
+COPY client/package*.json ./
+RUN npm ci || npm i
+COPY client/ ./
+RUN npm run build   # outputs to /client/dist
+
+# ---------- Install API deps ----------
+FROM node:20-alpine AS api-deps
+WORKDIR /app
+COPY api/package*.json ./
+RUN npm ci || npm i
+COPY api/ ./
+
+# ---------- Final image ----------
+FROM node:20-alpine
+WORKDIR /app
+ENV NODE_ENV=production
+# API code + deps
+COPY --from=api-deps /app /app
+# React build into /app/client (that server.js will serve)
+COPY --from=client-build /client/dist /app/client
+
+EXPOSE 8080
+CMD ["npm","start"]
+

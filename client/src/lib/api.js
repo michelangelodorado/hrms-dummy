@@ -1,11 +1,12 @@
-const API_BASE = import.meta.env.VITE_API_BASE_URL || 'http://localhost:8080';
+// client/src/lib/api.js
+const RAW_API_BASE = import.meta.env.VITE_API_BASE_URL ?? '';
+const API_BASE = RAW_API_BASE.replace(/\/+$/, ''); // trim trailing slash(es)
 
 export async function listEmployees(q) {
-const url = new URL(`${API_BASE}/api/employees`);
-if (q && q.trim() !== '') url.searchParams.set('q', q);
-const res = await fetch(url);
-if (!res.ok) throw new Error('Failed to fetch employees');
-return res.json();
+  const url = `${API_BASE}/api/employees`; // -> "/api/employees" if API_BASE is ""
+  const res = await fetch(q ? `${url}?q=${encodeURIComponent(q)}` : url);
+  if (!res.ok) throw new Error('Failed to fetch employees');
+  return res.json();
 }
 
 export async function addEmployee(payload) {
@@ -17,3 +18,4 @@ export async function addEmployee(payload) {
   if (!res.ok) throw new Error((await res.json()).error || 'Failed to add employee');
   return res.json();
 }
+

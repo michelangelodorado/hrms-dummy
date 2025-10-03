@@ -1,88 +1,126 @@
-import express from 'express';
-import cors from 'cors';
-import dotenv from 'dotenv';
-import { query } from './db.js';
+import express from "express";
+import cors from "cors";
+import pkg from "pg";
+import path from "path";
+import { fileURLToPath } from "url";
 
-dotenv.config();
-
+const { Pool } = pkg;
 const app = express();
-app.use(express.json());
-app.use(cors({ origin: process.env.CORS_ORIGIN?.split(',') || '*' }));
+const port = process.env.PORT || 8080;
 
-// Ensure table exists (idempotent)
-async function ensureSchema() {
-  await query(`
-    CREATE TABLE IF NOT EXISTS employees (
-      id SERIAL PRIMARY KEY,
-      first_name VARCHAR(50) NOT NULL,
-      last_name VARCHAR(50) NOT NULL,
-      nric VARCHAR(12) NOT NULL,
-      email VARCHAR(120) NOT NULL,
-      phone VARCHAR(32),
-      dob DATE,
-      address TEXT,
-      position VARCHAR(100),
-      department VARCHAR(100),
-      date_of_joining DATE,
-      salary INTEGER,
-      employment_type VARCHAR(32),
-      manager VARCHAR(100)
-    );
-  `);
+// Middleware
+app.use(cors());
+app.use(express.json());
+
+// Database connection
+const pool = new Pool({
+  host: process.env.PGHOST || "localhost",
+  user: process.env.PGUSER || "hrms",
+  password: process.env.PGPASSWORD || "hrmspass",
+  database: process.env.PGDATABASE || "hrms_db",
+  port: process.env.PGPORT || 5432,
+});
+
+// API routes
+app.get("/api/employees", async (req, res) => {
+  try {
+    const result = await pool.query("SELECT * FROM employees ORDER BY id ASC");
+    res.json(result.rows);
+  } catch (err) {
+    console.error(err);
+    res.status(500).json({ error: "Failed to fetch employees" });
+  }
+});
+
+// --- helpers (put near top of server.js)
+const nz = v => (v === "" || v == null ? null : v);
+// supports "yyyy-mm-dd" and "dd/mm/yyyy"; returns null if invalid
+function toISODate(s) {
+  if (!s) return null;
+  const t = String(s).trim();
+  if (/^\d{4}-\d{2}-\d{2}$/.test(t)) return t;                 // already ISO
+  const m = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(t);             // dd/mm/yyyy
+  return m ? `${m[3]}-${m[2]}-${m[1]}` : null;
 }
 
-app.get('/api/health', (_, res) => res.json({ ok: true }));
+// --- POST /api/employees (snake_case from frontend)
+app.post("/api/employees", async (req, res) => {
+  try {
+    const b = req.body;
 
-// GET /api/employees?q=...
-app.get('/api/employees', async (req, res) => {
-  const { q } = req.query;
-  let sql = 'SELECT * FROM employees';
-  const params = [];
-  if (q && q.trim() !== '') {
-    params.push(`%${q}%`);
-    sql += ` WHERE first_name ILIKE $1 OR last_name ILIKE $1 OR nric ILIKE $1 
-             OR email ILIKE $1 OR position ILIKE $1 OR department ILIKE $1`;
+    // expect snake_case from UI
+    const first_name       = b.first_name;
+    const last_name        = b.last_name;
+    const nric             = b.nric;
+    const email            = b.email;
+    const phone            = b.phone;
+    const dob              = b.dob;                // "yyyy-mm-dd" or "dd/mm/yyyy"
+    const address          = b.address;
+    const position         = b.position;
+    const department       = b.department;
+    const date_of_joining  = b.date_of_joining;    // "yyyy-mm-dd" or "dd/mm/yyyy"
+    const salary           = b.salary;             // may be null / ""
+    const employment_type  = b.employment_type;
+    const manager          = b.manager;
+
+    // REQUIRED (match NOT NULL cols)
+    for (const [key, val] of Object.entries({
+      first_name, last_name, nric, email
+    })) {
+      if (!val || String(val).trim() === "") {
+        return res.status(400).json({ error: `Missing required field: ${key}` });
+      }
+    }
+
+    const result = await pool.query(
+      `INSERT INTO employees
+        (first_name, last_name, nric, email, phone, dob, address,
+         position, department, date_of_joining, salary, employment_type, manager)
+       VALUES
+        ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+       RETURNING *`,
+      [
+        first_name.trim(),
+        last_name.trim(),
+        nric.trim(),
+        email.trim(),
+        nz(phone),
+        nz(toISODate(dob)),
+        nz(address),
+        nz(position),
+        nz(department),
+        nz(toISODate(date_of_joining)),
+        nz(Number.isFinite(parseInt(salary)) ? parseInt(salary) : null),
+        nz(employment_type),
+        nz(manager),
+      ]
+    );
+
+    res.json(result.rows[0]);
+  } catch (err) {
+    console.error("Insert error:", err);
+    res.status(500).json({ error: "Failed to add employee" });
   }
-  sql += ' ORDER BY id';
-  const { rows } = await query(sql, params);
-  res.json(rows);
 });
 
-// POST /api/employees
-app.post('/api/employees', async (req, res) => {
-  const {
-    first_name, last_name, nric, email, phone, dob, address,
-    position, department, date_of_joining,
-    salary, employment_type, manager
-  } = req.body || {};
 
-  if (!first_name || !last_name || !nric || !email) {
-    return res.status(400).json({ error: 'first_name, last_name, nric, and email are required' });
-  }
-  const { rows } = await query(
-    `INSERT INTO employees
-     (first_name, last_name, nric, email, phone, dob, address, position, department, date_of_joining, salary, employment_type, manager)
-     VALUES ($1,$2,$3,$4,$5, NULLIF($6,'')::date, $7, $8, $9, NULLIF($10,'')::date, $11, $12, $13)
-     RETURNING *;`,
-    [
-      first_name, last_name, nric, email, phone,
-      dob ?? '',                       // may be '' from the form
-      address, position, department,
-      date_of_joining ?? '',           // may be '' from the form
-      (salary === null || salary === '' ? null : Number(salary)),
-      employment_type, manager
-    ]
-  );
-  res.status(201).json(rows[0]);
+
+// ---------- Static React client serving ----------
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = path.dirname(__filename);
+const clientDist = path.join(__dirname, "client");
+
+// Serve static files from React build
+app.use(express.static(clientDist));
+
+// Fallback to index.html for non-API routes (React Router support)
+app.get(/^(?!\/api).*/, (req, res) => {
+  res.sendFile(path.join(clientDist, "index.html"));
+});
+// ------------------------------------------------
+
+// Start server
+app.listen(port, () => {
+  console.log(`Server running on port ${port}`);
 });
 
-await query(`CREATE INDEX IF NOT EXISTS idx_emp_first_name ON employees (lower(first_name));`);
-await query(`CREATE INDEX IF NOT EXISTS idx_emp_last_name  ON employees (lower(last_name));`);
-await query(`CREATE INDEX IF NOT EXISTS idx_emp_email      ON employees (lower(email));`);
-await query(`CREATE INDEX IF NOT EXISTS idx_emp_nric       ON employees (lower(nric));`);
-
-
-const port = process.env.PORT || 8080;
-ensureSchema().then(() => {
-  app.listen(port, () => console.log(`API listening on :${port}`));
-});

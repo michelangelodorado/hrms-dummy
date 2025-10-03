@@ -7,8 +7,8 @@ export default
     host: true,        // 0.0.0.0
     port: 5173,
     strictPort: true,
+    allowedHosts: true,
     hmr: {
-      host: 'localhost',  // what your browser uses to reach the dev server
       protocol: 'ws',
       port: 5173
     }
